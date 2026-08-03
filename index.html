@@ -77,6 +77,12 @@
   .item .actions{margin-top:9px; display:flex; gap:8px;}
   .item .actions button{padding:6px 11px; font-size:11px;}
   .empty{color:var(--dim); font-size:13px; text-align:center; padding:30px 0; font-family:var(--mono);}
+  .banner{
+    font-family:var(--mono); font-size:12px; padding:10px 12px; border-radius:8px;
+    margin-bottom:14px; display:none; align-items:center; gap:8px;
+  }
+  .banner.error{background:#e0625c22; border:1px solid #e0625c66; color:#f2a49f;}
+  .banner.ok{background:#5fb98c22; border:1px solid #5fb98c66; color:#a9e0c4;}
 </style>
 </head>
 <body>
@@ -86,6 +92,8 @@
     <div class="status"><div class="dot"></div>sincronizado</div>
   </header>
   <p class="sub">Pega (Ctrl+V) una captura o texto aquí, o sube un archivo. Abre este mismo enlace en tu celular para verlo y descargarlo. <b>Nota:</b> lo que subas aquí queda visible para cualquiera que abra este mismo enlace.</p>
+
+  <div class="banner" id="banner"></div>
 
   <div class="drop" id="dropZone" tabindex="0">
     <div class="hint">Haz clic aquí y pega con <b>Ctrl+V</b> (imagen o texto)</div>
@@ -109,6 +117,16 @@ const countEl = document.getElementById('count');
 const KEY = 'puente-items';
 
 function uid(){ return Date.now() + '-' + Math.random().toString(36).slice(2,8); }
+const MAX_BYTES = 4.3 * 1024 * 1024; // margen de seguridad bajo el límite de 5MB
+
+const bannerEl = document.getElementById('banner');
+function showBanner(msg, type){
+  bannerEl.textContent = msg;
+  bannerEl.className = 'banner ' + type;
+  bannerEl.style.display = 'flex';
+  clearTimeout(showBanner._t);
+  showBanner._t = setTimeout(() => { bannerEl.style.display = 'none'; }, 4500);
+}
 
 async function loadItems(){
   try{
@@ -116,9 +134,54 @@ async function loadItems(){
     return res ? JSON.parse(res.value) : [];
   }catch(e){ return []; }
 }
+
+// Guarda, y si el conjunto pesa demasiado va quitando los elementos más
+// antiguos hasta que quepa, en vez de fallar en silencio.
 async function saveItems(list){
-  try{ await window.storage.set(KEY, JSON.stringify(list), true); }
-  catch(e){ console.error('storage error', e); }
+  let working = list.slice();
+  while(true){
+    const payload = JSON.stringify(working);
+    if(payload.length <= MAX_BYTES || working.length <= 1){
+      try{
+        const res = await window.storage.set(KEY, payload, true);
+        if(res){
+          if(working.length < list.length){
+            showBanner('Se liberó espacio borrando los elementos más antiguos para que quepa lo nuevo.', 'error');
+          }
+          return { ok:true, list: working };
+        }
+      }catch(e){ /* sigue intentando reduciendo */ }
+    }
+    if(working.length <= 1){
+      showBanner('El archivo es demasiado pesado para guardarse (límite ~4MB en total).', 'error');
+      return { ok:false, list: working.length > 1 ? working.slice(0,-1) : [] };
+    }
+    working = working.slice(0, -1); // quita el más antiguo (está al final)
+  }
+}
+
+// Redimensiona/comprime una imagen a JPEG para que no pese demasiado.
+function compressImage(dataUrl, maxDim = 1600, quality = 0.82){
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if(width > maxDim || height > maxDim){
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0,0,width,height);
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 function fmtTime(ts){
@@ -129,8 +192,9 @@ function fmtTime(ts){
 async function addItem(item){
   const list = await loadItems();
   list.unshift({ id: uid(), ts: Date.now(), ...item });
-  await saveItems(list);
-  render(list);
+  const result = await saveItems(list);
+  render(result.list);
+  return result.ok;
 }
 async function removeItem(id){
   const list = (await loadItems()).filter(i => i.id !== id);
@@ -186,11 +250,16 @@ dropZone.addEventListener('paste', async (e) => {
   const items = e.clipboardData.items;
   for(const it of items){
     if(it.type.startsWith('image/')){
+      e.preventDefault();
       const file = it.getAsFile();
       const reader = new FileReader();
-      reader.onload = () => addItem({type:'image', data: reader.result});
+      reader.onload = async () => {
+        showBanner('Procesando imagen…', 'ok');
+        const compressed = await compressImage(reader.result);
+        const ok = await addItem({type:'image', data: compressed});
+        if(ok) showBanner('Imagen guardada. Ábrelo en tu celular para verla.', 'ok');
+      };
       reader.readAsDataURL(file);
-      e.preventDefault();
       return;
     }
   }
@@ -207,17 +276,22 @@ document.getElementById('fileBtn').addEventListener('click', () => document.getE
 document.getElementById('fileInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if(!file) return;
-  if(file.size > 4.5 * 1024 * 1024){
-    alert('El archivo es muy grande (máx. ~4.5MB).');
-    return;
-  }
   const reader = new FileReader();
   reader.onload = async () => {
+    let ok;
     if(file.type.startsWith('image/')){
-      await addItem({type:'image', data: reader.result, name: file.name});
+      showBanner('Procesando imagen…', 'ok');
+      const compressed = await compressImage(reader.result);
+      ok = await addItem({type:'image', data: compressed, name: file.name});
     } else {
-      await addItem({type:'file', data: reader.result, name: file.name});
+      if(file.size > 4 * 1024 * 1024){
+        showBanner('El archivo es demasiado pesado (máx. ~4MB).', 'error');
+        e.target.value = '';
+        return;
+      }
+      ok = await addItem({type:'file', data: reader.result, name: file.name});
     }
+    if(ok) showBanner('Guardado. Ábrelo en tu celular para verlo.', 'ok');
   };
   reader.readAsDataURL(file);
   e.target.value = '';
