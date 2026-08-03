@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Puente</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>puente<span>_</span></h1>
+    <div class="whoami">público · visible para todos</div>
+  </header>
+  <p class="sub">Envía texto o archivos. Cualquiera que abra este enlace puede verlos y agregar los suyos.</p>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="drop" id="dropZone" tabindex="0">
+    <textarea id="textIn" placeholder="Escribe o pega texto/imagen aquí (Ctrl+V)…"></textarea>
+  </div>
+  <div class="row-actions">
+    <button class="primary" id="sendTextBtn">Enviar</button>
+    <button id="fileBtn">Subir archivo</button>
+    <input type="file" id="fileInput">
+  </div>
+
+  <div class="log-label"><span>Elementos</span><span id="count"></span></div>
+  <div class="items" id="items"></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
