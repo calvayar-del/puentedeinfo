@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Puente</title>
+<style>
+  :root{
+    --ink:#161b22;
+    --panel:#1e2530;
+    --line:#2b3442;
+    --paper:#eef1f5;
+    --dim:#8894a3;
+    --signal:#f0a63d;
+    --signal-dim:#f0a63d33;
+    --ok:#5fb98c;
+    --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; background:var(--ink); color:var(--paper);
+    font-family:var(--sans); padding:24px 16px 60px;
+  }
+  .wrap{max-width:640px; margin:0 auto;}
+  header{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:6px;}
+  h1{font-family:var(--mono); font-size:20px; font-weight:700; letter-spacing:.5px; margin:0; color:var(--paper);}
+  h1 span{color:var(--signal);}
+  .status{font-family:var(--mono); font-size:11px; color:var(--dim); display:flex; align-items:center; gap:6px;}
+  .dot{width:7px;height:7px;border-radius:50%; background:var(--ok); box-shadow:0 0 0 0 rgba(95,185,140,.6); animation:pulse 2s infinite;}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(95,185,140,.5);}
+    70%{box-shadow:0 0 0 8px rgba(95,185,140,0);}
+    100%{box-shadow:0 0 0 0 rgba(95,185,140,0);}
+  }
+  .sub{font-size:12.5px; color:var(--dim); margin:0 0 20px; line-height:1.5;}
+
+  .drop{
+    border:1.5px dashed var(--line); border-radius:10px; padding:22px 16px;
+    text-align:center; cursor:text; transition:border-color .15s, background .15s;
+    background:var(--panel); margin-bottom:14px; position:relative;
+  }
+  .drop.active{border-color:var(--signal); background:var(--signal-dim);}
+  .drop .hint{font-size:13px; color:var(--dim); font-family:var(--mono);}
+  .drop .hint b{color:var(--paper); font-weight:600;}
+  textarea#textIn{
+    width:100%; background:transparent; border:none; color:var(--paper);
+    font-family:var(--sans); font-size:14.5px; resize:none; outline:none;
+    min-height:20px; margin-top:8px; display:none;
+  }
+  .row-actions{display:flex; gap:8px; margin-bottom:22px;}
+  button{
+    font-family:var(--mono); font-size:12px; border-radius:7px; border:1px solid var(--line);
+    background:var(--panel); color:var(--paper); padding:9px 14px; cursor:pointer;
+    transition:border-color .15s, background .15s;
+  }
+  button:hover{border-color:var(--signal);}
+  button.primary{background:var(--signal); color:var(--ink); border-color:var(--signal); font-weight:700;}
+  button.primary:hover{opacity:.9;}
+  input[type=file]{display:none;}
+
+  .log-label{font-family:var(--mono); font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:1px; margin:0 0 10px; display:flex; justify-content:space-between;}
+  .items{display:flex; flex-direction:column; gap:10px;}
+  .item{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+    animation:slidein .25s ease;
+  }
+  @keyframes slidein{from{opacity:0; transform:translateY(-4px);} to{opacity:1; transform:none;}}
+  .item .meta{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
+  .item .time{font-family:var(--mono); font-size:10.5px; color:var(--dim);}
+  .item .kill{background:none; border:none; color:var(--dim); font-size:15px; padding:0 4px; cursor:pointer;}
+  .item .kill:hover{color:#e0625c;}
+  .item img{max-width:100%; border-radius:6px; display:block;}
+  .item .txt{font-size:14px; white-space:pre-wrap; word-break:break-word; line-height:1.5;}
+  .item .file{display:flex; align-items:center; gap:10px; font-size:13px;}
+  .item .file .fname{font-family:var(--mono); color:var(--paper); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .item .actions{margin-top:9px; display:flex; gap:8px;}
+  .item .actions button{padding:6px 11px; font-size:11px;}
+  .empty{color:var(--dim); font-size:13px; text-align:center; padding:30px 0; font-family:var(--mono);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>puente<span>_</span></h1>
+    <div class="status"><div class="dot"></div>sincronizado</div>
+  </header>
+  <p class="sub">Pega (Ctrl+V) una captura o texto aquí, o sube un archivo. Abre este mismo enlace en tu celular para verlo y descargarlo. <b>Nota:</b> lo que subas aquí queda visible para cualquiera que abra este mismo enlace.</p>
+
+  <div class="drop" id="dropZone" tabindex="0">
+    <div class="hint">Haz clic aquí y pega con <b>Ctrl+V</b> (imagen o texto)</div>
+    <textarea id="textIn" placeholder="Escribe o pega texto..."></textarea>
+  </div>
+  <div class="row-actions">
+    <button class="primary" id="sendTextBtn">Enviar texto</button>
+    <button id="fileBtn">Subir archivo</button>
+    <input type="file" id="fileInput">
+  </div>
+
+  <div class="log-label"><span>Elementos compartidos</span><span id="count"></span></div>
+  <div class="items" id="items"></div>
+</div>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const textIn = document.getElementById('textIn');
+const itemsEl = document.getElementById('items');
+const countEl = document.getElementById('count');
+const KEY = 'puente-items';
+
+function uid(){ return Date.now() + '-' + Math.random().toString(36).slice(2,8); }
+
+async function loadItems(){
+  try{
+    const res = await window.storage.get(KEY, true);
+    return res ? JSON.parse(res.value) : [];
+  }catch(e){ return []; }
+}
+async function saveItems(list){
+  try{ await window.storage.set(KEY, JSON.stringify(list), true); }
+  catch(e){ console.error('storage error', e); }
+}
+
+function fmtTime(ts){
+  const d = new Date(ts);
+  return d.toLocaleString('es-PE', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'});
+}
+
+async function addItem(item){
+  const list = await loadItems();
+  list.unshift({ id: uid(), ts: Date.now(), ...item });
+  await saveItems(list);
+  render(list);
+}
+async function removeItem(id){
+  const list = (await loadItems()).filter(i => i.id !== id);
+  await saveItems(list);
+  render(list);
+}
+
+function render(list){
+  countEl.textContent = list.length ? list.length : '';
+  if(!list.length){
+    itemsEl.innerHTML = '<div class="empty">Nada por aquí todavía.</div>';
+    return;
+  }
+  itemsEl.innerHTML = list.map(it => {
+    let body = '';
+    if(it.type === 'image'){
+      body = `<img src="${it.data}" alt="captura">
+        <div class="actions"><button onclick="downloadItem('${it.id}')">Descargar</button></div>`;
+    } else if(it.type === 'file'){
+      body = `<div class="file"><span class="fname">${it.name}</span></div>
+        <div class="actions"><button onclick="downloadItem('${it.id}')">Descargar</button></div>`;
+    } else {
+      body = `<div class="txt">${it.data.replace(/</g,'&lt;')}</div>
+        <div class="actions"><button onclick="copyItem('${it.id}')">Copiar</button></div>`;
+    }
+    return `<div class="item" data-id="${it.id}">
+      <div class="meta"><span class="time">${fmtTime(it.ts)}</span><button class="kill" onclick="removeItem('${it.id}')">✕</button></div>
+      ${body}
+    </div>`;
+  }).join('');
+}
+
+window.downloadItem = async (id) => {
+  const list = await loadItems();
+  const it = list.find(i => i.id === id);
+  if(!it) return;
+  const a = document.createElement('a');
+  a.href = it.data;
+  a.download = it.name || ('puente-' + id);
+  a.click();
+};
+window.copyItem = async (id) => {
+  const list = await loadItems();
+  const it = list.find(i => i.id === id);
+  if(!it) return;
+  try{ await navigator.clipboard.writeText(it.data); }catch(e){}
+};
+window.removeItem = removeItem;
+
+dropZone.addEventListener('click', () => { textIn.style.display='block'; textIn.focus(); });
+
+dropZone.addEventListener('paste', async (e) => {
+  const items = e.clipboardData.items;
+  for(const it of items){
+    if(it.type.startsWith('image/')){
+      const file = it.getAsFile();
+      const reader = new FileReader();
+      reader.onload = () => addItem({type:'image', data: reader.result});
+      reader.readAsDataURL(file);
+      e.preventDefault();
+      return;
+    }
+  }
+});
+
+document.getElementById('sendTextBtn').addEventListener('click', async () => {
+  const val = textIn.value.trim();
+  if(!val) return;
+  await addItem({type:'text', data: val});
+  textIn.value = '';
+});
+
+document.getElementById('fileBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  if(file.size > 4.5 * 1024 * 1024){
+    alert('El archivo es muy grande (máx. ~4.5MB).');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    if(file.type.startsWith('image/')){
+      await addItem({type:'image', data: reader.result, name: file.name});
+    } else {
+      await addItem({type:'file', data: reader.result, name: file.name});
+    }
+  };
+  reader.readAsDataURL(file);
+  e.target.value = '';
+});
+
+(async () => {
+  const list = await loadItems();
+  render(list);
+  setInterval(async () => { render(await loadItems()); }, 4000);
+})();
+</script>
+</body>
+</html>
