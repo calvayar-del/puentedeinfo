@@ -129,6 +129,10 @@ function showBanner(msg, type){
 }
 
 async function loadItems(){
+  if(!window.storage){
+    showBanner('Este panel no puede guardar así: ábrelo desde la vista previa de Claude (no como archivo descargado) en ambos dispositivos.', 'error');
+    return [];
+  }
   try{
     const res = await window.storage.get(KEY, true);
     return res ? JSON.parse(res.value) : [];
@@ -136,12 +140,20 @@ async function loadItems(){
 }
 
 // Guarda, y si el conjunto pesa demasiado va quitando los elementos más
-// antiguos hasta que quepa, en vez de fallar en silencio.
+// antiguos hasta que quepa. Si el fallo no es por tamaño, avisa el motivo real.
 async function saveItems(list){
+  if(!window.storage){
+    showBanner('Este panel no puede guardar así: ábrelo desde la vista previa de Claude (no como archivo descargado) en ambos dispositivos.', 'error');
+    return { ok:false, list: list.slice(1) };
+  }
   let working = list.slice();
+  let lastError = null;
+
   while(true){
     const payload = JSON.stringify(working);
-    if(payload.length <= MAX_BYTES || working.length <= 1){
+    const tooBig = payload.length > MAX_BYTES;
+
+    if(!tooBig){
       try{
         const res = await window.storage.set(KEY, payload, true);
         if(res){
@@ -150,13 +162,25 @@ async function saveItems(list){
           }
           return { ok:true, list: working };
         }
-      }catch(e){ /* sigue intentando reduciendo */ }
+        lastError = 'storage.set devolvió vacío';
+      }catch(e){
+        lastError = (e && e.message) ? e.message : String(e);
+      }
+      // Si no es por tamaño, no tiene sentido seguir borrando elementos: reintenta una vez.
+      console.error('puente: fallo al guardar:', lastError);
+      try{
+        const res2 = await window.storage.set(KEY, payload, true);
+        if(res2) return { ok:true, list: working };
+      }catch(e2){ lastError = (e2 && e2.message) ? e2.message : String(e2); }
+      showBanner('No se pudo guardar (' + lastError + '). Intenta de nuevo.', 'error');
+      return { ok:false, list: list.slice(1) }; // descarta solo el nuevo elemento que falló
     }
+
     if(working.length <= 1){
       showBanner('El archivo es demasiado pesado para guardarse (límite ~4MB en total).', 'error');
-      return { ok:false, list: working.length > 1 ? working.slice(0,-1) : [] };
+      return { ok:false, list: [] };
     }
-    working = working.slice(0, -1); // quita el más antiguo (está al final)
+    working = working.slice(0, -1); // quita el más antiguo (está al final) y reintenta
   }
 }
 
